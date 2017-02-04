@@ -1,7 +1,9 @@
+This project was forked and enhanced from [Andrea Cardaci's project](https://github.com/cyrus-and/gdb-dashboard)
+
 GDB dashboard
 =============
 
-Modular visual interface for GDB in Python.
+Modular visual interface for console GDB, in Python.
 
 This comes as a standalone single-file [`.gdbinit`][raw] which, among the other
 things, enables a configurable dashboard showing the most relevant information

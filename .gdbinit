@@ -1282,22 +1282,60 @@ class Threads(Dashboard.Module):
         out = []
         selected_thread = gdb.selected_thread()
         selected_frame = gdb.selected_frame()
-        for thread in gdb.Inferior.threads(gdb.selected_inferior()):
-            is_selected = (thread.ptid == selected_thread.ptid)
-            style = R.style_selected_1 if is_selected else R.style_selected_2
-            number = ansi(str(thread.num), style)
-            tid = ansi(str(thread.ptid[1] or thread.ptid[2]), style)
-            info = '[{}] id {}'.format(number, tid)
-            if thread.name:
-                info += ' name {}'.format(ansi(thread.name, style))
-            # switch thread to fetch frame info
-            thread.switch()
-            frame = gdb.newest_frame()
-            info += ' ' + Stack.get_pc_line(frame, style)
-            out.append(info)
+        for inf in gdb.inferiors():
+            if inf.is_valid:
+                is_selected = 0
+                style = R.style_selected_1 if is_selected else R.style_selected_2
+                number = ansi(str(inf.num), style)
+                pid = ansi(str(inf.pid), style)
+                info = '  [{}] inferior process pid {} threads:'.format(number, pid)
+                out.append(info)
+                for thread in gdb.Inferior.threads(inf):
+                    if thread.is_valid:
+                        is_selected = (thread.ptid == selected_thread.ptid)
+                        style = R.style_selected_1 if is_selected else R.style_selected_2
+                        number = ansi(str(thread.num), style)
+                        tid = ansi(str(thread.ptid[1] or thread.ptid[2]), style)
+                        info = '[{}] id {}'.format(number, tid)
+                        if thread.name:
+                            info += ' name {}'.format(ansi(thread.name, style))
+                        # switch thread to fetch frame info
+                        thread.switch()
+                        frame = gdb.newest_frame()
+                        info += ' ' + Stack.get_pc_line(frame, style)
+                        out.append(info)
         # restore thread and frame
         selected_thread.switch()
         selected_frame.select()
+        return out
+
+class Breaks(Dashboard.Module):
+    """List the current breakpoints."""
+
+    def label(self):
+        return 'Breaks'
+
+    def lines(self, term_width, style_changed):
+        out = []
+        if not (gdb.breakpoints() is None):
+            for bp in gdb.breakpoints():
+                if bp.is_valid and bp.visible:
+                    en = 'en ' if bp.enabled else 'dis'
+                    desc = ''
+                    if bp.ignore_count > 0:
+                        desc += ' ignore ' + str(bp.ignore_count)
+                    if not (bp.thread is None):
+                        desc += ' thread ' + str(bp.thread)
+                    if not (bp.condition is None):
+                        desc += ' if (' + bp.condition + ')'
+                    if bp.temporary:
+                        desc += ' temp'
+                    if not (bp.expression is None):
+                        desc += ' watch ' + ansi(bp.expression, R.style_selected_1)
+                    else:
+                        desc += ' at ' + ansi(bp.location, R.style_selected_1)
+                    info = '[{}] {} hit {}{}'.format(bp.number, en, bp.hit_count, desc)
+                    out.append(info)
         return out
 
 class Expressions(Dashboard.Module):
@@ -1371,6 +1409,28 @@ set print pretty on
 set print array off
 set print array-indexes on
 set python print-stack full
+add-auto-load-safe-path /home
+
+define hookpost-run
+    # scheduler-locking can only be set after the program is launched.
+    set scheduler-locking step
+end
+
+define hookpost-stop
+end
+
+define bs
+    info breakpoints
+end
+
+define ts
+    info threads
+end
+
+define is
+    info inferiors
+end
+
 
 # Start ------------------------------------------------------------------------
 
