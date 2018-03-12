@@ -971,18 +971,19 @@ location, if available. Optionally list the frame arguments and locals too."""
         # find the selected frame (i.e., the first to display)
         selected_index = 0
         frame = gdb.newest_frame()
-        while frame:
-            if frame == gdb.selected_frame():
-                break
-            frame = frame.older()
-            selected_index += 1
+        #while frame:
+        #    if frame == gdb.selected_frame():
+        #        break
+        #    frame = frame.older()
+        #    selected_index += 1
         # format up to "limit" frames
         frames = []
         number = selected_index
         more = False
         while frame:
             # the first is the selected one
-            selected = (len(frames) == 0)
+            #selected = (len(frames) == 0)
+            selected = (frame == gdb.selected_frame())
             # fetch frame info
             style = R.style_selected_1 if selected else R.style_selected_2
             frame_id = ansi(str(number), style)
@@ -993,18 +994,18 @@ location, if available. Optionally list the frame arguments and locals too."""
             decorator = gdb.FrameDecorator.FrameDecorator(frame)
             if self.show_arguments:
                 frame_args = decorator.frame_args()
-                args_lines = Stack.fetch_frame_info(frame, frame_args, 'arg')
+                args_lines = Stack.fetch_frame_info(frame, frame_args, '    arg', term_width)
                 if args_lines:
                     frame_lines.extend(args_lines)
-                else:
-                    frame_lines.append(ansi('(no arguments)', R.style_low))
+                #else:
+                    #frame_lines.append(ansi('    (no arguments)', R.style_low))
             if self.show_locals:
                 frame_locals = decorator.frame_locals()
-                locals_lines = Stack.fetch_frame_info(frame, frame_locals, 'loc')
+                locals_lines = Stack.fetch_frame_info(frame, frame_locals, '    loc', term_width)
                 if locals_lines:
                     frame_lines.extend(locals_lines)
-                else:
-                    frame_lines.append(ansi('(no locals)', R.style_low))
+                #else:
+                    #frame_lines.append(ansi('    (no locals)', R.style_low))
             # add frame
             frames.append(frame_lines)
             # next
@@ -1026,13 +1027,22 @@ location, if available. Optionally list the frame arguments and locals too."""
         return lines
 
     @staticmethod
-    def fetch_frame_info(frame, data, prefix):
+    def fetch_frame_info(frame, data, prefix, term_width):
         prefix = ansi(prefix, R.style_low)
         lines = []
+        line = ''
         for elem in data or []:
             name = elem.sym
             value = to_string(elem.sym.value(frame))
-            lines.append('{} {} = {}'.format(prefix, name, value))
+            out = '{} {} = {}'.format(prefix, name, value).replace('\n', ansi('\\n', R.style_low))
+            if term_width > 20 and len(out) > term_width - 15:
+                out = out[:term_width - 15] + '...'
+            if len(line) + len(out) > term_width or len(out) > term_width / 2:
+                lines.append(line)
+                line = ''                
+            line += out
+        if len(line) > 0:
+            lines.append(line)
         return lines
 
     @staticmethod
@@ -1063,7 +1073,7 @@ location, if available. Optionally list the frame arguments and locals too."""
         return {
             'limit': {
                 'doc': 'Maximum number of displayed frames (0 means no limit).',
-                'default': 2,
+                'default': 15,
                 'type': int,
                 'check': check_ge_zero
             },
@@ -1288,7 +1298,7 @@ class Threads(Dashboard.Module):
                 style = R.style_selected_1 if is_selected else R.style_selected_2
                 number = ansi(str(inf.num), style)
                 pid = ansi(str(inf.pid), style)
-                info = '  [{}] inferior process pid {} threads:'.format(number, pid)
+                info = '[{}] inferior process pid {} threads:'.format(number, pid)
                 out.append(info)
                 for thread in gdb.Inferior.threads(inf):
                     if thread.is_valid:
@@ -1296,13 +1306,16 @@ class Threads(Dashboard.Module):
                         style = R.style_selected_1 if is_selected else R.style_selected_2
                         number = ansi(str(thread.num), style)
                         tid = ansi(str(thread.ptid[1] or thread.ptid[2]), style)
-                        info = '[{}] id {}'.format(number, tid)
+                        info = '    [{}] id {}'.format(number, tid)
                         if thread.name:
                             info += ' name {}'.format(ansi(thread.name, style))
                         # switch thread to fetch frame info
-                        thread.switch()
-                        frame = gdb.newest_frame()
-                        info += ' ' + Stack.get_pc_line(frame, style)
+                        try:
+                            thread.switch()
+                            frame = gdb.newest_frame()
+                            info += ' ' + Stack.get_pc_line(frame, style)
+                        except:
+                            info += ansi(' (gdb failed to fetch frame)', R.style_low)
                         out.append(info)
         # restore thread and frame
         selected_thread.switch()
@@ -1317,7 +1330,7 @@ class Breaks(Dashboard.Module):
 
     def lines(self, term_width, style_changed):
         out = []
-        if not (gdb.breakpoints() is None):
+        if not (gdb.breakpoints() == None):
             for bp in gdb.breakpoints():
                 if bp.is_valid and bp.visible:
                     en = 'en ' if bp.enabled else 'dis'
@@ -1334,7 +1347,8 @@ class Breaks(Dashboard.Module):
                         desc += ' watch ' + ansi(bp.expression, R.style_selected_1)
                     else:
                         desc += ' at ' + ansi(bp.location, R.style_selected_1)
-                    info = '[{}] {} hit {}{}'.format(bp.number, en, bp.hit_count, desc)
+                    hit = ansi('hit', R.style_low)
+                    info = '[{}] {} {} {}{}'.format(bp.number, en, hit, bp.hit_count, desc)
                     out.append(info)
         return out
 
@@ -1407,9 +1421,11 @@ set confirm off
 set verbose off
 set print pretty on
 set print array off
-set print array-indexes on
+set print array-indexes off
+set output-radix 16
 set python print-stack full
 add-auto-load-safe-path /home
+add-auto-load-safe-path /usr/share/gdb
 
 define hookpost-run
     # scheduler-locking can only be set after the program is launched.
@@ -1417,6 +1433,50 @@ define hookpost-run
 end
 
 define hookpost-stop
+end
+
+define hookpost-frame
+    dashboard
+end
+
+define hookpost-up
+    dashboard
+end
+
+define hookpost-down
+    dashboard
+end
+
+define hookpost-inferior
+    dashboard
+end
+
+define hookpost-thread
+    dashboard
+end
+
+define hookpost-break
+    dashboard
+end
+
+define hookpost-delete
+    dashboard
+end
+
+define hookpost-clear
+    dashboard
+end
+
+define hookpost-enable
+    dashboard
+end
+
+define hookpost-disable
+    dashboard
+end
+
+define hookpost-watch
+    dashboard
 end
 
 define bs
